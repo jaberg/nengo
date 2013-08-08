@@ -135,7 +135,12 @@ class Simulator(object):
         #    print k, v
 
         for nl in self.model.nonlinearities:
-            self.signals[nl.input_signal][...] = self.signals[nl.bias_signal]
+            if hasattr(nl, 'input_signal'):
+                if hasattr(nl, 'bias_signal'):
+                    bias = self.signals[nl.bias_signal]
+                    self.signals[nl.input_signal][...] = bias
+                else:
+                    self.signals[nl.input_signal][...] = 0
 
         # -- encoders: signals -> input current
         #    (N.B. this includes neuron -> neuron connections)
@@ -151,15 +156,23 @@ class Simulator(object):
         # -- population dynamics
         for nl in self.model.nonlinearities:
             pop = self.nonlinearities[nl]
-            pop.step(dt=self.model.dt,
-                     J=self.signals[nl.input_signal],
+            if hasattr(nl, 'input_signal'):
+                 J = self.signals[nl.input_signal]
+            else:
+                 J = None
+            pop.step(dt=self.model.dt, J=J,
                      output=self.signals_tmp[nl.output_signal])
 
         # -- decoders: population output -> signals_tmp
         for dec in self.model.decoders:
-            dot_inc(self.signals_tmp[dec.pop.output_signal],
+            try:
+                dot_inc(
+                    self.signals_tmp[dec.pop.output_signal],
                     dec.weights.T,
                     get_signal(self.signals_tmp, dec.sig))
+            except Exception, e:
+                e.args = e.args + ('Error running %s>' % dec,)
+                raise
 
         # -- copy: signals -> signals_copy
         for sig in self.dynamic_signals:
@@ -196,7 +209,7 @@ class Simulator(object):
 
         # -- probes signals -> probe buffers
         for probe in self.model.probes:
-            period = int(probe.dt / self.model.dt)
+            period = max(1, int(probe.dt / self.model.dt))
             if self.n_steps % period == 0:
                 tmp = get_signal(self.signals, probe.sig).copy()
                 self.probe_outputs[probe].append(tmp)
