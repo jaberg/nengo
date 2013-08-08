@@ -41,6 +41,17 @@ registry = {
     Direct: SimDirect,
     }
 
+
+def register_handler(cls):
+    def deco(obj):
+        if cls in registry:
+            print ("Warning: replacing %s with %s as handler for %s" %
+                (registry[cls], obj, cls))
+        registry[cls] = obj
+        return obj
+    return deco
+
+
 def get_signal(signals_dct, obj):
     # look up a Signal or SignalView
     # in a `signals_dct` such as self.signals
