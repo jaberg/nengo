@@ -87,7 +87,7 @@ class SignalView(object):
             #    but there are limits too, because we can only
             #    support view-based reshapes. So the strides have
             #    to work.
-            raise TODO('reshape of strided view')
+            raise TODO('reshape of strided view', self.elemstrides, shape)
 
     def transpose(self, neworder=None):
         raise TODO('transpose')
