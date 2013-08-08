@@ -23,12 +23,11 @@ class Direct(object):
             self.bias_signal = Constant(n=n_in, value=np.zeros(n_in))
         else:
             self.input_signal = Signal(n_in,
-                                      name=name + '.input')
+                                       name=name + '.input')
             self.output_signal = Signal(n_out,
-                                       name=name + '.output')
-            self.bias_signal = Constant(n=n_in,
-                                        value=np.zeros(n_in),
-                                       name=name + '.bias')
+                                        name=name + '.output')
+            self.bias_signal = Constant(value=np.zeros(n_in),
+                                        name=name + '.bias')
 
         self.n_in = n_in
         self.n_out = n_out
@@ -50,13 +49,12 @@ class LIF(object):
         if name is None:
             self.input_signal = Signal(n_neurons)
             self.output_signal = Signal(n_neurons)
-            self.bias_signal = Constant(n=n_neurons, value=np.zeros(n_neurons))
+            self.bias_signal = Constant(value=np.zeros(n_neurons))
         else:
             self.input_signal = Signal(n_neurons, name=name + '.input')
             self.output_signal = Signal(n_neurons, name=name + '.output')
-            self.bias_signal = Constant(n=n_neurons,
-                                        value=np.zeros(n_neurons),
-                                       name=name + '.bias')
+            self.bias_signal = Constant(value=np.zeros(n_neurons),
+                                        name=name + '.bias')
 
         self.n_neurons = n_neurons
         self.upsample = upsample

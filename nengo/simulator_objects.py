@@ -69,6 +69,7 @@ class SignalView(object):
     def reshape(self, *shape):
         if len(shape) == 1 and isinstance(shape[0], (list, tuple)):
             shape = shape[0]
+
         if self.elemstrides == (1,):
             size = int(np.prod(shape))
             if size != self.size:
@@ -196,13 +197,15 @@ class Probe(object):
         return str(self)
 
 
-class Constant(Signal):
+class Constant(SignalView):
     """A signal meant to hold a fixed value"""
-    def __init__(self, n, value, name=None):
-        Signal.__init__(self, n, name=name)
+    def __init__(self, value, name=None):
         self.value = np.asarray(value)
-        # TODO: change constructor to get n from value
-        assert self.value.size == n
+        if name is not None:
+            self._name = name
+        if assert_named_signals:
+            assert name
+
 
     def __str__(self):
         return "Constant (" + str(self.value) + ", id " + str(id(self)) + ")"
@@ -218,6 +221,10 @@ class Constant(Signal):
     def elemstrides(self):
         s = np.asarray(self.value.strides)
         return tuple(map(int, s / self.dtype.itemsize))
+
+    @property
+    def dtype(self):
+        return self.value.dtype
 
 
 class Nonlinearity(object):
@@ -239,8 +246,7 @@ class Transform(object):
         alpha = np.asarray(alpha)
         if hasattr(outsig, 'value'):
             raise TypeError('transform destination is constant')
-        self.alpha_signal = Constant(n=alpha.size,
-                                     value=alpha,
+        self.alpha_signal = Constant(value=alpha,
                                      name='tf_alpha')
         self.insig = insig
         self.outsig = outsig
@@ -279,7 +285,7 @@ class Filter(object):
         if hasattr(newsig, 'value'):
             raise TypeError('filter destination is constant')
         alpha = np.asarray(alpha)
-        self.alpha_signal = Constant(n=alpha.size, value=alpha,
+        self.alpha_signal = Constant(value=alpha,
                                      name='f_alpha')
         self.oldsig = oldsig
         self.newsig = newsig
@@ -326,7 +332,7 @@ class Encoder(object):
             weights = np.asarray(weights)
             if weights.shape != (pop.n_in, sig.size):
                 raise ValueError('weight shape', weights.shape)
-        self.weights_signal = Constant(n=weights.size, value=weights)
+        self.weights_signal = Constant(value=weights)
 
     def __str__(self):
         return ("Encoder (id " + str(id(self)) + ")"
@@ -350,11 +356,14 @@ class Decoder(object):
         self.sig = sig
         if weights is None:
             weights = random_weight_rng.randn(sig.size, pop.n_out)
+            self.weights_signal = Constant(value=weights)
+        elif is_float(weights):
+            self.weights_signal = Constant(value=weights)
         else:
             weights = np.asarray(weights)
             if weights.shape != (sig.size, pop.n_out):
                 raise ValueError('weight shape', weights.shape)
-        self.weights_signal = Constant(n=weights.size, value=weights)
+            self.weights_signal = Constant(value=weights)
 
     def __str__(self):
         return ("Decoder (id " + str(id(self)) + ")"
@@ -391,7 +400,7 @@ class SimModel(object):
         if value is None:
             rval = Signal(n, name=name)
         else:
-            rval = Constant(n, value, name=name)
+            rval = Constant(value, name=name)
         self.signals.add(rval)
         return rval
 
