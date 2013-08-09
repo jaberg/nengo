@@ -21,6 +21,14 @@ up in a model.
 assert_named_signals = False
 
 
+def is_float(obj):
+    try:
+        float(obj)
+        return True
+    except TypeError:
+        return False
+
+
 class ShapeMismatch(ValueError):
     pass
 
