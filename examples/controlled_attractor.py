@@ -61,7 +61,8 @@ def main():
     N_NEURONS = 2000
     N_POSITIONS = 20  # -- position is grid of this many points
     N_BASIS = 8       # -- represent position in terms of this many Fourier components
-    clamp_dt = 0.10   # -- holds matrix rows this many secs
+    clamp_dt = 0.001   # -- holds matrix rows this many secs
+    clamp_steps = 2000
 
     # 1: create signals
     basis_signal = Signal(N_BASIS * 2, dtype='float')
@@ -87,54 +88,39 @@ def main():
 
     # 4: train encoder/decoder circuit
 
-    # 4.1: Sample all possible positions
-    data_positions = np.eye(N_POSITIONS)
-
-    # 4.2: Sample all possible directions
-    data_directions = np.asarray([-1, 0, 1])
+    # 4.1: Sample a possible trajectory
+    data_directions = (rng.rand(clamp_steps) * 2 - 1) / 10
+    data_positions_real = np.cumsum(data_directions)
+    data_positions_table = np.zeros((len(data_positions_real), N_POSITIONS))
+    for pos, table in zip(data_positions_real, data_positions_table):
+        pos = pos % N_POSITIONS  # -- ensures non-neg, but still float
+        posi = int(pos)
+        posf = pos - posi
+        table[posi] = 1.0 - posf
+        table[(posi + 1) % N_POSITIONS] = posf
 
     # 4.3: Convert data positions to Fourier domain
-    blobs = scipy.signal.lfilter([.15, .7, .15], [1], data_positions)
+    blobs = scipy.signal.lfilter([.15, .7, .15], [1], data_positions_table)
     basis_blobs = scipy.fftpack.fft(blobs)
     basis_blobs[:, N_BASIS:] = 0
-    if 0:
+    if 1:
+        plt.subplot(1, 2, 1)
+        plt.plot(data_positions_real)
+        plt.subplot(1, 2, 2)
         d2 = scipy.fftpack.ifft(basis_blobs)
         plt.imshow(np.real(d2))
         plt.show()
     data_basis = np.empty((len(basis_blobs), 2 * N_BASIS))
     data_basis[:, ::2] = np.real(basis_blobs[:, :N_BASIS])
     data_basis[:, 1::2] = np.imag(basis_blobs[:, :N_BASIS])
+    data_basis_next = np.zeros_like(data_basis)
+    data_basis_next[:-1] = data_basis[1:]
+    data_basis_next[-1] = data_basis[0]
 
-    # 4.4: Build a training set
-    Xbasis = list()
-    Xdirec = list()
-    Ybasis = list()
-    Yposit = list()
-    # loop forward over the positions
-    for ii in range(N_POSITIONS):
-        Xbasis.append(data_basis[ii])
-        Xdirec.append(0)
-        Ybasis.append(data_basis[ii])
-        Yposit.append(data_positions[ii])
-        Xbasis.append(data_basis[ii])
-        Xdirec.append(1)
-        Ybasis.append(data_basis[(ii + 1) % N_POSITIONS])
-        Yposit.append(data_positions[(ii + 1) % N_POSITIONS])
-    # loop backward over the positions
-    for ii in range(N_POSITIONS):
-        Xbasis.append(data_basis[-ii])
-        Xdirec.append(0)
-        Ybasis.append(data_basis[-ii])
-        Yposit.append(data_positions[-ii])
-        Xbasis.append(data_basis[-ii])
-        Xdirec.append(-1)
-        Ybasis.append(data_basis[(-ii - 1) % N_POSITIONS])
-        Yposit.append(data_positions[(-ii - 1) % N_POSITIONS])
-
-    clamp_basis = Clamp(np.asarray(Xbasis), dt=clamp_dt)
-    clamp_direc = Clamp(np.asarray(Xdirec)[:, None], dt=clamp_dt)
-    clamp_basis_out = Clamp(np.asarray(Ybasis), dt=clamp_dt)
-    clamp_positions = Clamp(np.asarray(Yposit), dt=clamp_dt)
+    clamp_basis = Clamp(np.asarray(data_basis), dt=clamp_dt)
+    clamp_direc = Clamp(np.asarray(data_directions)[:, None], dt=clamp_dt)
+    clamp_basis_out = Clamp(np.asarray(data_basis_next), dt=clamp_dt)
+    clamp_positions = Clamp(np.asarray(data_positions_table), dt=clamp_dt)
 
     # 4.4: Run simulator
     training_model = SimModel()
