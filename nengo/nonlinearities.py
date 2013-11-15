@@ -57,14 +57,9 @@ class Neurons(object):
     def n_out(self):
         return self.n_neurons
 
-    def default_encoders(self, dimensions, rng):
-        raise NotImplementedError("Neurons must provide default_encoders")
-
     def rates(self, J_without_bias):
         raise NotImplementedError("Neurons must provide rates")
 
-    def set_gain_bias(self, max_rates, intercepts):
-        raise NotImplementedError("Neurons must provide set_gain_bias")
 
 class Direct(Neurons):
     def __init__(self, n_neurons=None, name=None):
@@ -82,14 +77,9 @@ class Direct(Neurons):
         # Dimensions are set in the build process
         return self.dimensions
 
-    def default_encoders(self, dimensions, rng):
-        return np.eye(dimensions)
-
     def rates(self, J_without_bias):
         return J_without_bias
 
-    def set_gain_bias(self, max_rates, intercepts):
-        pass
 
 
 # TODO: class BasisFunctions or Population or Express;
@@ -102,10 +92,6 @@ class _LIFBase(Neurons):
         self.tau_rc = tau_rc
         self.tau_ref = tau_ref
         Neurons.__init__(self, n_neurons, name=name)
-
-    def default_encoders(self, dimensions, rng):
-        return decoders.sample_hypersphere(
-            dimensions, self.n_neurons, rng, surface=True)
 
     def rates(self, J_without_bias):
         """LIF firing rates in Hz
@@ -127,27 +113,6 @@ class _LIFBase(Neurons):
             np.seterr(**old)
         return A
 
-    def set_gain_bias(self, max_rates, intercepts):
-        """Compute the alpha and bias needed to get the given max_rate
-        and intercept values.
-
-        Returns gain (alpha) and offset (j_bias) values of neurons.
-
-        Parameters
-        ---------
-        max_rates : list of floats
-            Maximum firing rates of neurons.
-        intercepts : list of floats
-            X-intercepts of neurons.
-
-        """
-        logging.debug("Setting gain and bias on %s", self.name)
-        max_rates = np.asarray(max_rates)
-        intercepts = np.asarray(intercepts)
-        x = 1.0 / (1 - np.exp(
-            (self.tau_ref - (1.0 / max_rates)) / self.tau_rc))
-        self.gain = (1 - x) / (intercepts - 1.0)
-        self.bias = 1 - self.gain * intercepts
 
 
 class LIFRate(_LIFBase):
