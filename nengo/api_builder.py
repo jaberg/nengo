@@ -7,6 +7,7 @@ from itertools import chain
 logger = logging.getLogger(__name__)
 
 import decoders
+from . import api
 
 from builder import (
     ShapeMismatch,
@@ -83,10 +84,10 @@ class Builder(object):
 
         # 2. Then probes
         logger.info("Building probes")
-        for probe in self.model['probes']:
-            if not isinstance(self.model.probed[target], Probe):
-                self._builders[objects.Probe](self.model.probed[target])
-                self.model.probed[target] = self.model.probed[target].probe
+        model_probes = chain(*[[(m, p) for p in m['probes']]
+                         for m in midx.values()])
+        for m, probe in model_probes:
+            self.build_probe(probe, m)
 
         # 3. Then connections
         logger.info("Building connections")
@@ -108,6 +109,23 @@ class Builder(object):
                        Signal(1),
                        self.model.steps.output_signal))
         return self.model
+
+    @property
+    def signal(self):
+        class Lookup(object):
+            def __getitem__(_s, item):
+                name, submodel = item
+                for obj in submodel.get('objects', []):
+                    if obj.name == name:
+                        return obj
+                for obj in submodel.get('probes', []):
+                    if obj.name == name:
+                        return obj
+                for obj in submodel.get('connections', []):
+                    if obj.name == name:
+                        return obj
+                raise KeyError(name)
+        return Lookup()
 
     def build_ensemble(self, ens, signal=None):
         if ens.dimensions <= 0:
@@ -218,20 +236,16 @@ class Builder(object):
                 node.input_signal, Signal([[1.0]]), node.pyfn.input_signal))
             node.output_signal = node.pyfn.output_signal
 
-        # # Set up probes
-        # for probe in node.probes['output']:
-        #     probe.dimensions = node.output_signal.shape
-
-    def build_probe(self, probe):
-        # Set up signal
-        probe.input_signal = Signal(np.zeros(probe.dimensions), name=probe.name)
-
-        #reset input signal to 0 each timestep
-        self.operators.append(Reset(probe.input_signal))
-
-        # Set up probe
-        probe.probe = Probe(probe.input_signal, probe.sample_every)
-        self.model.probes.append(probe.probe)
+    def build_probe(self, pdict, submodel):
+        try:
+            obj = self.signal[pdict.signame, submodel]
+            sig = obj.output_signal
+        except KeyError:
+            raise NotImplementedError(pdict)
+        pdict.input_signal = Signal(np.zeros(sig.shape),
+                                    name=pdict.signame)
+        self.operators.append(Reset(pdict.input_signal))
+        self.probes.append(Probe(pdict.input_signal, pdict.sample_every))
 
     @staticmethod
     def filter_coefs(pstc, dt):
@@ -266,11 +280,6 @@ class Builder(object):
         # Set up transform
         self.operators.append(DotInc(
             Signal(conn.transform), conn.input_signal, conn.output_signal))
-
-        # Set up probes
-        for probe in conn.probes['signal']:
-            probe.dimensions = conn.output_signal.size
-            self.model.add(probe)
 
     def build_decodedconnection(self, conn):
         assert isinstance(conn.pre, objects.Ensemble)

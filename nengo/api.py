@@ -1,7 +1,6 @@
 from functools import partial
 import copy
 from simulator import Simulator
-from api_builder import Builder
 import numpy as np
 from objects import Uniform
 
@@ -95,8 +94,10 @@ def LIF(n_neurons, tau_rc=0.02, tau_ref=.002):
             })
 
 
-def _get_ens_by_name(name):
-    matching = [e for e in _active_model().get('objects', [])
+def _get_ens_by_name(name, model=None):
+    if model is None:
+        model = _active_model()
+    matching = [e for e in model.get('objects', [])
                 if (e['object_type'] == 'ensemble'
                     and e['name'] == name)]
     assert len(matching) < 2
@@ -163,12 +164,17 @@ def passthrough(name):
     return node(name, output=None)
 
 
-def probe(name, filter=None):
+def dimensions(signame, model=None):
+    return _get_ens_by_name(signame, model).dimensions
+
+
+def probe(signame, sample_every=0.001, filter=0.01):
     _active_model().setdefault('probes', [])
-    _active_model()['probes'].append({
-        'name': name,
+    _active_model()['probes'].append(DotDict({
+        'signame': signame,
         'filter': filter,
-        })
+        'sample_every': sample_every,
+        }))
 
 
 def simulator(model, dt=0.001, sim_class=Simulator):
@@ -194,6 +200,7 @@ def simulator(model, dt=0.001, sim_class=Simulator):
         A new simulator object, containing a copy of the model in its
         current state.
     """
+    from api_builder import Builder
     builder = Builder(copy=True)
     builder(model, dt)
 
