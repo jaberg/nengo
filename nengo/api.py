@@ -42,14 +42,27 @@ class defining(object):
         model_stack.pop()
 
 
-def active_model():
+def _active_model():
     return model_stack[-1]
 
 
-def submodel(name):
-    active_model().setdefault('models', [])
+def _init_model(dct):
+    with defining(dct):
+        node('t', output=0)
+        node('steps', output=0)
+        probe('t')
+
+
+def model(name):
     new_model = DotDict({'name': name})
-    active_model()['models'].append(new_model)
+    _init_model(new_model)
+    return defining(new_model)
+
+def submodel(name):
+    _active_model().setdefault('models', [])
+    new_model = DotDict({'name': name})
+    _init_model(new_model)
+    _active_model()['models'].append(new_model)
     return defining(new_model)
 
 
@@ -62,8 +75,8 @@ def integrator(name, recurrent_tau, **ens_args):
 
 
 def connect(src, dst, transform=None, filter=None):
-    active_model().setdefault('connections', [])
-    active_model()['connections'].append(DotDict({
+    _active_model().setdefault('connections', [])
+    _active_model()['connections'].append(DotDict({
         'src': src,
         'dst': dst,
         'transform': transform,
@@ -83,7 +96,7 @@ def LIF(n_neurons, tau_rc=0.02, tau_ref=.002):
 
 
 def _get_ens_by_name(name):
-    matching = [e for e in active_model().get('objects', [])
+    matching = [e for e in _active_model().get('objects', [])
                 if (e['object_type'] == 'ensemble'
                     and e['name'] == name)]
     assert len(matching) < 2
@@ -95,8 +108,8 @@ def _get_ens_by_name(name):
 
 def ensemble(name, neurons, dimensions, seed=None, radius=1.0):
     """Create an Ensemble"""
-    active_model().setdefault('objects', [])
-    active_model()['objects'].append(DotDict({
+    _active_model().setdefault('objects', [])
+    _active_model()['objects'].append(DotDict({
         'object_type': 'ensemble',
         'name': name,
         'neurons': neurons,
@@ -113,7 +126,7 @@ def ensemble(name, neurons, dimensions, seed=None, radius=1.0):
 
 def ensemble_array(*args, **kwargs):
     """Create an EnsembleArray"""
-    active_model().add(EnsembleArray(*args, **kwargs))
+    _active_model().add(EnsembleArray(*args, **kwargs))
 
 
 def encoders(name, val):
@@ -134,31 +147,53 @@ def n_neurons(name):
     _get_ens_by_name(name)['neurons']['n_neurons']
 
 
-def node(name, fn):
+def node(name, output):
     """Create a Node"""
-    active_model().setdefault('objects', [])
-    active_model()['objects'].append(DotDict({
+    _active_model().setdefault('objects', [])
+    _active_model()['objects'].append(DotDict({
         'object_type': 'node',
         'name': name,
-        'output': fn,
-        'dimensions': np.asarray(fn(0)).size if fn else 1
+        'output': output,
+        'dimensions': np.asarray(output(0)).size if output else 1
         }))
 
 
 def passthrough(name):
     """Create a Passthrough Node"""
-    return node(name, fn=None)
+    return node(name, output=None)
 
 
 def probe(name, filter=None):
-    active_model().setdefault('probes', [])
-    active_model()['probes'].append({
+    _active_model().setdefault('probes', [])
+    _active_model()['probes'].append({
         'name': name,
         'filter': filter,
         })
 
 
 def simulator(model, dt=0.001, sim_class=Simulator):
+    """Get a new simulator object for the model.
+
+    Parameters
+    ----------
+    dt : float, optional
+        Fundamental unit of time for the simulator, in seconds.
+    sim_class : child class of `Simulator`, optional
+        The class of simulator to be used.
+    seed : int, optional
+        Random number seed for the simulator's random number generator.
+        This random number generator is responsible for creating any random
+        numbers used during simulation, such as random noise added to
+        neurons' membrane voltages.
+    **sim_args : optional
+        Arguments to pass to the simulator constructor.
+
+    Returns
+    -------
+    simulator : `sim_class`
+        A new simulator object, containing a copy of the model in its
+        current state.
+    """
     builder = Builder(copy=True)
     builder(model, dt)
 

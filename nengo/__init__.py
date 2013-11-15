@@ -4,7 +4,6 @@ __license__ = "http://www.gnu.org/licenses/gpl.html"
 import logging
 import sys
 
-from .model import Model
 from .nonlinearities import LIF
 
 
