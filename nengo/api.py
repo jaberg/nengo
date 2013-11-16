@@ -1,36 +1,30 @@
+from copy import deepcopy
 from functools import partial
-import copy
 from simulator import Simulator
 import numpy as np
 from objects import Uniform
+from decoders import least_squares
+
 
 class DotDict(dict):
+    """Dictionary with attribute access to items
     """
-    a dictionary that supports dot notation 
-    as well as dictionary access notation 
-    usage: d = DotDict() or d = DotDict({'val1':'first'})
-    set attributes: d.val2 = 'second' or d['val2'] = 'second'
-    get attributes: d.val2 or d['val2']
-    """
-#    def __getattribute__(self, attr):
-#        try:
-#            return self[attr]
-#        except KeyError:
-#            raise AttributeError(attr)
     __getattr__ = dict.__getitem__
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
+
     def __deepcopy__(self, memo):
         if id(self) in memo:
             return memo[id(self)]
-        dc = copy.deepcopy
-        rval = DotDict(map(partial(copy.deepcopy, memo=memo), self.items()))
+        rval = DotDict(map(partial(deepcopy, memo=memo), self.items()))
         assert id(self) not in rval
         memo[id(self)] = rval
         return rval
 
 
 model_stack = []
+_model_groups = 'objects', 'probes', 'connections', 'models'
+
 
 class defining(object):
     def __init__(self, model):
@@ -47,7 +41,6 @@ class defining(object):
 def _active_model():
     return model_stack[-1]
 
-_model_groups = 'objects', 'probes', 'connections', 'models'
 
 def _init_model(dct):
     for group in _model_groups:
@@ -68,14 +61,14 @@ def _model_lookup(dct, key):
 
 def _rec_model_lookup(dct, key):
     for term in key.split('.'):
-        print '_rec_model_lookup', term, dct.keys()
+        #print('_rec_model_lookup %s  %s' % (term, str(dct.keys())))
         dct = _model_lookup(dct, term)
     return dct
 
 
 def model(name='root', descr=None):
     new_model = DotDict({'name': name,
-                         'descr':descr,
+                         'descr': descr,
                          'model_type': 'root'})
     _init_model(new_model)
     with defining(new_model):
@@ -84,6 +77,7 @@ def model(name='root', descr=None):
         node('_steps', output=0)
         probe('_t')
     return defining(new_model)
+
 
 def submodel(name, descr=None):
     new_model = DotDict({'name': name,
@@ -94,12 +88,12 @@ def submodel(name, descr=None):
     return defining(new_model)
 
 
-def integrator(name, recurrent_tau, dimensions=1, **ens_args):
+def integrator(name, recurrent_tau, dimensions, **ens_args):
     with submodel(name):
         passthrough('in', dimensions=dimensions)
         ensemble('integrator', dimensions=dimensions, **ens_args)
-        connect('integrator', 'integrator', filter=recurrent_tau)
-        connect('in', 'integrator', filter=recurrent_tau)
+        decode_connect('integrator', 'integrator', filter=recurrent_tau)
+        encode('in', 'integrator', filter=recurrent_tau)
         #TODO:  alias('integrator', 'out')
 
 
@@ -113,17 +107,43 @@ def connect(pre, post, transform=None, filter=None, name=None):
         'modulatory': False,
         'filter': filter}))
 
+
+def encode(pre, post, transform=None, filter=None, name=None):
+    return connect(pre, post, transform, filter, name)
+
+
+def decode_connect(pre, post, function=lambda x: x,
+                   transform=None,
+                   filter=None,
+                   decoder_solver=least_squares,
+                   name=None):
+    _active_model()['connections'].append(DotDict({
+        'name': name,
+        'connection_type': 'decodedconnection',
+        'pre': pre,
+        'post': post,
+        'function': function,
+        'transform': transform,
+        'eval_points': None,
+        'EVAL_POINTS': 500,
+        'modulatory': False,
+        'decoder_solver': decoder_solver,
+        '_decoders': None,
+        'filter': filter}))
+
+
 def LIF(n_neurons, tau_rc=0.02, tau_ref=.002):
-    return DotDict({'neuron_type': 'lif',
-            'name': 'lif',  #?
-            'n_in': n_neurons,
-            'n_out': n_neurons,
-            'n_neurons': n_neurons,
-            'tau_rc': tau_rc,
-            'tau_ref': tau_ref,
-            'gain': None,
-            'bias': None,
-            })
+    return DotDict({
+        'neuron_type': 'lif',
+        'name': 'lif',
+        'n_in': n_neurons,
+        'n_out': n_neurons,
+        'n_neurons': n_neurons,
+        'tau_rc': tau_rc,
+        'tau_ref': tau_ref,
+        'gain': None,
+        'bias': None,
+        })
 
 
 def _get_ens_by_name(name, model=None):
@@ -158,7 +178,7 @@ def ensemble(name, neurons, dimensions, seed=None, radius=1.0):
 
 def ensemble_array(*args, **kwargs):
     """Create an EnsembleArray"""
-    _active_model().add(EnsembleArray(*args, **kwargs))
+    raise NotImplementedError()
 
 
 def encoders(name, val):
@@ -211,7 +231,7 @@ def probe(signame, sample_every=0.001, filter=0.01, name=None):
         }))
 
 
-def simulator(model, dt=0.001, sim_class=Simulator):
+def simulator(model, dt=0.001, sim_class=Simulator, seed=0):
     """Get a new simulator object for the model.
 
     Parameters
@@ -236,6 +256,6 @@ def simulator(model, dt=0.001, sim_class=Simulator):
     """
     from api_builder import Builder
     builder = Builder(model, dt, copy=True)
+    return sim_class(builder, seed=seed)
 
-    raise NotImplementedError()
-
+# -- EOF

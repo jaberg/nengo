@@ -4,8 +4,6 @@ __license__ = "http://www.gnu.org/licenses/gpl.html"
 import logging
 import sys
 
-from .nonlinearities import LIF
-
 
 logger = logging.getLogger(__name__)
 try:

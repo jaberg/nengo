@@ -6,7 +6,6 @@ Reference simulator for nengo models.
 import logging
 import itertools
 from collections import defaultdict
-import time
 
 import networkx as nx
 import numpy as np
@@ -54,35 +53,26 @@ class SignalDict(dict):
 class Simulator(object):
     """Reference simulator for models."""
 
-    def __init__(self, model, dt, seed=None, builder=None):
-        if builder is None:
-            # By default, we'll use builder.Builder and copy the model.
-            builder = Builder(copy=True)
-
-        # Call the builder to build the model
-        self.model = builder(model, dt)
-
-        # Note: seed is not used right now, but one day...
-        if seed is None:
-            seed = self.model._get_new_seed() # generate simulator seed
+    def __init__(self, builder, seed=None):
+        self.builder = builder
 
         # -- map from Signal.base -> ndarray
         self._sigdict = SignalDict()
-        for op in self.model.operators:
-            op.init_sigdict(self._sigdict, self.model.dt)
+        for op in self.builder.operators:
+            op.init_sigdict(self._sigdict, self.builder.dt)
 
         self.dg = self._init_dg()
         self._step_order = [node
             for node in nx.topological_sort(self.dg)
             if hasattr(node, 'make_step')]
-        self._steps = [node.make_step(self._sigdict, self.model.dt)
+        self._steps = [node.make_step(self._sigdict, self.builder.dt)
             for node in self._step_order]
 
         self.n_steps = 0
-        self.probe_outputs = dict((probe, []) for probe in self.model.probes)
+        self.probe_outputs = dict((probe, []) for probe in self.builder.probes)
 
     def _init_dg(self, verbose=False):
-        operators = self.model.operators
+        operators = self.builder.operators
         dg = nx.DiGraph()
 
         for op in operators:

@@ -20,7 +20,7 @@ class TestIntegrator(SimulatorTestCase):
             ng.integrator('T', tau,  neurons=ng.LIF(100), dimensions=1)
             ng.connect('input', 'T.in', filter=tau)
             ng.ensemble('A', ng.LIF(100), dimensions=1)
-            ng.connect('A', 'A', transform=[[1]], filter=tau)
+            ng.decode_connect('A', 'A', transform=[[1]], filter=tau)
             ng.connect('input', 'A', transform=[[tau]], filter=tau)
             ng.probe('input')
             ng.probe('A', filter=0.01)

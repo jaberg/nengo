@@ -1,174 +1,51 @@
-import logging
-
 import numpy as np
 
-from . import decoders
 
-logger = logging.getLogger(__name__)
-
-
-class PythonFunction(object):
-    def __init__(self, fn, n_in, n_out=None, name=None):
-        if name is None:
-            name = "<Direct%d>" % id(self)
-        self.name = name
-        self.n_in = n_in
-        if n_out is None:
-            self.n_out = np.asarray(fn(np.ones(n_in))).size
-        self.fn = fn
-
-    def __deepcopy__(self, memo):
-        try:
-            return memo[id(self)]
-        except KeyError:
-            rval = self.__class__.__new__(self.__class__)
-            memo[id(self)] = rval
-            for k, v in self.__dict__.items():
-                if k == 'fn':
-                    rval.fn = v
-                else:
-                    rval.__dict__[k] = copy.deepcopy(v, memo)
-            return rval
+def lif_rate(dt, J, tau_rc, tau_ref):
+    """Compute rates for input current (incl. bias)"""
+    old = np.seterr(divide='ignore')
+    try:
+        j = np.maximum(J - 1, 0.)
+        r = dt / (tau_ref + tau_rc * np.log1p(1. / j))
+    finally:
+        np.seterr(**old)
+    return r
 
 
-class Neurons(object):
-    def __init__(self, n_neurons, bias=None, gain=None, name=None):
-        self.n_neurons = n_neurons
-        self.bias = bias
-        self.gain = gain
-        if name is None:
-            name = "<%s%d>" % (self.__class__.__name__, id(self))
-        self.name = name
+def lif_step(dt, J, voltage, refractory_time, spiked, tau_rc, tau_ref):
+    # N.B. J here *includes* bias
 
-    def __str__(self):
-        r = self.__class__.__name__ + "("
-        r += self.name if hasattr(self, 'name') else "id " + str(id(self))
-        r += ", %dN)" if hasattr(self, 'n_neurons') else ")"
-        return r
+    # Euler's method
+    dV = dt / tau_rc * (J - voltage)
 
-    def __repr__(self):
-        return str(self)
+    # increase the voltage, ignore values below 0
+    v = np.maximum(voltage + dV, 0)
 
-    @property
-    def n_in(self):
-        return self.n_neurons
+    # handle refractory period
+    post_ref = 1.0 - (refractory_time - dt) / dt
 
-    @property
-    def n_out(self):
-        return self.n_neurons
+    # set any post_ref elements < 0 = 0, and > 1 = 1
+    v *= np.clip(post_ref, 0, 1)
 
-    def rates(self, J_without_bias):
-        raise NotImplementedError("Neurons must provide rates")
+    old = np.seterr(all='ignore')
+    try:
+        # determine which neurons spike
+        # if v > 1 set spiked = 1, else 0
+        spiked[:] = (v > 1) * 1.0
 
+        # linearly approximate time since neuron crossed spike threshold
+        overshoot = (v - 1) / dV
+        spiketime = dt * (1.0 - overshoot)
 
-class Direct(Neurons):
-    def __init__(self, n_neurons=None, name=None):
-        # n_neurons is ignored, but accepted to maintain compatibility
-        # with other neuron types
-        Neurons.__init__(self, 0, name=name)
+        # adjust refractory time (neurons that spike get a new
+        # refractory time set, all others get it reduced by dt)
+        new_refractory_time = spiked * (spiketime + tau_ref) \
+                              + (1 - spiked) * (refractory_time - dt)
+    finally:
+        np.seterr(**old)
 
-    @property
-    def n_in(self):
-        # Dimensions are set in the build process
-        return self.dimensions
+    # return an ordered dictionary of internal variables to update
+    # (including setting a neuron that spikes to a voltage of 0)
 
-    @property
-    def n_out(self):
-        # Dimensions are set in the build process
-        return self.dimensions
-
-    def rates(self, J_without_bias):
-        return J_without_bias
-
-
-
-# TODO: class BasisFunctions or Population or Express;
-#       uses non-neural basis functions to emulate neuron saturation,
-#       but still simulate very fast
-
-
-class _LIFBase(Neurons):
-    def __init__(self, n_neurons, tau_rc=0.02, tau_ref=0.002, name=None):
-        self.tau_rc = tau_rc
-        self.tau_ref = tau_ref
-        Neurons.__init__(self, n_neurons, name=name)
-
-    def rates(self, J_without_bias):
-        """LIF firing rates in Hz
-
-        Parameters
-        ---------
-        J_without_bias: ndarray of any shape
-            membrane currents, without bias voltage
-        """
-        old = np.seterr(divide='ignore', invalid='ignore')
-        try:
-            J = J_without_bias + self.bias
-            A = self.tau_ref - self.tau_rc * np.log(
-                1 - 1.0 / np.maximum(J, 0))
-            # if input current is enough to make neuron spike,
-            # calculate firing rate, else return 0
-            A = np.where(J > 1, 1 / A, 0)
-        finally:
-            np.seterr(**old)
-        return A
-
-
-
-class LIFRate(_LIFBase):
-    def math(self, dt, J):
-        """Compute rates for input current (incl. bias)"""
-        old = np.seterr(divide='ignore')
-        try:
-            j = np.maximum(J - 1, 0.)
-            r = dt / (self.tau_ref + self.tau_rc * np.log1p(1./j))
-        finally:
-            np.seterr(**old)
-        return r
-
-
-class LIF(_LIFBase):
-    def __init__(self, n_neurons, upsample=1, **kwargs):
-        _LIFBase.__init__(self, n_neurons, **kwargs)
-        self.upsample = upsample
-
-    def step_math0(self, dt, J, voltage, refractory_time, spiked):
-        if self.upsample != 1:
-            raise NotImplementedError()
-
-        # N.B. J here *includes* bias
-
-        # Euler's method
-        dV = dt / self.tau_rc * (J - voltage)
-
-        # increase the voltage, ignore values below 0
-        v = np.maximum(voltage + dV, 0)
-
-        # handle refractory period
-        post_ref = 1.0 - (refractory_time - dt) / dt
-
-        # set any post_ref elements < 0 = 0, and > 1 = 1
-        v *= np.clip(post_ref, 0, 1)
-
-        old = np.seterr(all='ignore')
-        try:
-            # determine which neurons spike
-            # if v > 1 set spiked = 1, else 0
-            spiked[:] = (v > 1) * 1.0
-
-            # linearly approximate time since neuron crossed spike threshold
-            overshoot = (v - 1) / dV
-            spiketime = dt * (1.0 - overshoot)
-
-            # adjust refractory time (neurons that spike get a new
-            # refractory time set, all others get it reduced by dt)
-            new_refractory_time = spiked * (spiketime + self.tau_ref) \
-                                  + (1 - spiked) * (refractory_time - dt)
-        finally:
-            np.seterr(**old)
-
-        # return an ordered dictionary of internal variables to update
-        # (including setting a neuron that spikes to a voltage of 0)
-
-        voltage[:] = v * (1 - spiked)
-        refractory_time[:] = new_refractory_time
+    voltage[:] = v * (1 - spiked)
+    refractory_time[:] = new_refractory_time

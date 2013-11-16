@@ -1,5 +1,6 @@
 from copy import deepcopy
 import logging
+from collections import OrderedDict
 import numpy as np
 import nonlinearities
 from itertools import chain
@@ -65,7 +66,7 @@ class Builder(object):
                                    np.random.randint(np.iinfo(np.int32).max))
         self.rng = np.random.RandomState(self.seed)
 
-        midx = {}
+        midx = OrderedDict()
         model_index(midx, (), self.model)
         self.midx = midx
 
@@ -74,22 +75,20 @@ class Builder(object):
         self.operators = []
 
         logger.info("Building objects")
-        model_objects = chain(*[[(m, o) for o in m['objects']]
-                         for m in midx.values()])
+        model_objects = list(chain(*[[(m, o) for o in m['objects']]
+                                     for m in midx.values()]))
         for m, obj in model_objects:
             getattr(self, 'build_%s' % obj['object_type'])(obj, m)
 
-        print map(id, model_objects)
-
         logger.info("Building probes")
-        model_probes = chain(*[[(m, p) for p in m['probes']]
-                         for m in midx.values()])
+        model_probes = list(chain(*[[(m, p) for p in m['probes']]
+                                    for m in midx.values()]))
         for m, probe in model_probes:
             self.build_probe(probe, m)
 
         logger.info("Building connections")
-        model_conns = chain(*[[(m, c) for c in m['connections']]
-                         for m in midx.values()])
+        model_conns = list(chain(*[[(m, c) for c in m['connections']]
+                                   for m in midx.values()]))
         for m, c in model_conns:
             getattr(self, 'build_%s' % c['connection_type'])(c, m)
 
@@ -104,6 +103,9 @@ class Builder(object):
                        Signal(1),
                        Signal(1),
                        self.lookup(self.model, '_steps').output_signal))
+
+    def __call__(self, *args, **kwargs):
+        return self
 
     def _get_new_seed(self):
         return self.rng.randint(np.iinfo(np.int32).max)
@@ -162,14 +164,15 @@ class Builder(object):
             norm = np.sum(ens.encoders * ens.encoders, axis=1)[:, np.newaxis]
             ens.encoders /= np.sqrt(norm)
 
-        if isinstance(ens.neurons, nonlinearities.Direct):
+        if ens.neurons.neuron_type == 'direct':
             ens._scaled_encoders = ens.encoders
         else:
             ens._scaled_encoders = ens.encoders * (
                 ens.neurons.gain / ens.radius)[:, np.newaxis]
         self.operators.append(DotInc(Signal(ens._scaled_encoders),
-                                           ens.input_signal,
-                                           ens.neurons.input_signal))
+                                     ens.input_signal,
+                                     ens.neurons.input_signal,
+                                     tag='encoders'))
 
         # Output is neural output
         ens.output_signal = ens.neurons.output_signal
@@ -201,16 +204,15 @@ class Builder(object):
         else:
             node.input_signal = Signal(np.zeros(node.dimensions),
                                        name=node.name + ".signal")
+            n_out = np.asarray(node.output(0)).size
+            node.output_signal = Signal(np.zeros(n_out),
+                                       name=node.name + ".output")
 
             #reset input signal to 0 each timestep
             self.operators.append(Reset(node.input_signal))
-
-            node.pyfn = nonlinearities.PythonFunction(
-                fn=node.output, n_in=node.dimensions, name=node.name + ".pyfn")
-            self.build_pyfunc(node.pyfn)
-            self.operators.append(DotInc(
-                node.input_signal, Signal([[1.0]]), node.pyfn.input_signal))
-            node.output_signal = node.pyfn.output_signal
+            self.operators.append(SimPyFunc(node.output_signal,
+                                            node.input_signal,
+                                            node.output))
         print 'build_node: %s.%s' % (submodel.name, node.name)
 
     def lookup(self, submodel, key):
@@ -254,7 +256,7 @@ class Builder(object):
             conn.output_signal = Signal(np.zeros(conn.dimensions),
                                         name=conn.name + ".mod_output")
 
-        if isinstance(conn.post, nonlinearities.Neurons):
+        if self.lookup(conn.post, submodel).object_type == 'neurons':
             conn.transform *= conn.post.gain[:, np.newaxis]
 
         # Set up filter
@@ -263,26 +265,38 @@ class Builder(object):
                 conn.input_signal, conn.filter)
 
         # Set up transform
-        self.operators.append(DotInc(
-            Signal(conn.transform), conn.input_signal, conn.output_signal))
+        try:
+            self.operators.append(
+                DotInc(
+                    Signal(conn.transform),
+                    conn.input_signal,
+                    conn.output_signal,
+                    tag='connection'))
+        except:
+            print 'Building connection', conn
+            raise
 
-    def build_decodedconnection(self, conn):
-        assert isinstance(conn.pre, objects.Ensemble)
-        conn.input_signal = conn.pre.output_signal
-        conn.output_signal = conn.post.input_signal
+    def build_decodedconnection(self, conn, submodel):
+        pre = self.lookup(submodel, conn.pre)
+        post = self.lookup(submodel, conn.post)
+        assert pre.object_type == 'ensemble'
+        conn.input_signal = pre.output_signal
+        conn.output_signal = post.input_signal
         if conn.modulatory:
             # Make a new signal, effectively detaching from post,
             # but still performing the decoding
             conn.output_signal = Signal(np.zeros(conn.dimensions),
                                         name=conn.name + ".mod_output")
-        if isinstance(conn.post, nonlinearities.Neurons):
-            conn.transform *= conn.post.gain[:, np.newaxis]
+        if post.object_type == 'neurons':
+            # XXX WORKS?
+            conn.transform *= post.gain[:, np.newaxis]
         dt = self.dt
 
         # A special case for Direct mode.
         # In Direct mode, rather than do decoders, we just
         # compute the function and make a direct connection.
-        if isinstance(conn.pre.neurons, nonlinearities.Direct):
+        if pre.neurons.neuron_type == 'direct':
+            # XXX WORKS?
             if conn.function is None:
                 conn.signal = conn.input_signal
             else:
@@ -300,17 +314,25 @@ class Builder(object):
 
         else:
             # For normal decoded connections...
-            conn.input_signal = conn.pre.output_signal
-            conn.signal = Signal(np.zeros(conn.dimensions), name=conn.name)
+            conn.signal = Signal(np.zeros(post.dimensions), name=conn.name)
 
             # Set up decoders
             if conn._decoders is None:
-                activities = conn.pre.activities(conn.eval_points) * dt
+                eval_points = conn.eval_points
+                if eval_points is None:
+                    eval_points = pre.eval_points
+
+                rates_fn = getattr(self, 'rates_' + pre.neurons.neuron_type)
+
+                activities = rates_fn(pre.neurons,
+                                      np.dot(eval_points,
+                                             pre._scaled_encoders.T))
+
                 if conn.function is None:
-                    targets = conn.eval_points
+                    targets = eval_points
                 else:
                     targets = np.array(
-                        [conn.function(ep) for ep in conn.eval_points])
+                        [conn.function(ep) for ep in eval_points])
                     if len(targets.shape) < 2:
                         targets.shape = targets.shape[0], 1
                 conn._decoders = conn.decoder_solver(activities, targets)
@@ -333,11 +355,6 @@ class Builder(object):
         # Set up transform
         self.operators.append(DotInc(
             Signal(conn.transform), conn.signal, conn.output_signal))
-
-        # Set up probes
-        for probe in conn.probes['signal']:
-            probe.dimensions = conn.output_signal.size
-            self.model.add(probe)
 
     def build_connectionlist(self, conn):
         conn.transform = np.asarray(conn.transform)
@@ -444,3 +461,22 @@ class Builder(object):
                                            voltage=lif.voltage,
                                            refractory_time=lif.refractory_time))
 
+    def rates_lif(self, lif, J_without_bias):
+        """LIF firing rates in Hz
+
+        Parameters
+        ---------
+        J_without_bias: ndarray of any shape
+            membrane currents, without bias voltage
+        """
+        old = np.seterr(divide='ignore', invalid='ignore')
+        try:
+            J = J_without_bias + lif.bias
+            A = lif.tau_ref - lif.tau_rc * np.log(
+                1 - 1.0 / np.maximum(J, 0))
+            # if input current is enough to make neuron spike,
+            # calculate firing rate, else return 0
+            A = np.where(J > 1, 1 / A, 0)
+        finally:
+            np.seterr(**old)
+        return A
