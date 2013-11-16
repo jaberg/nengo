@@ -47,32 +47,36 @@ class defining(object):
 def _active_model():
     return model_stack[-1]
 
+_model_groups = 'objects', 'probes', 'connections', 'models'
+
 def _init_model(dct):
-    dct['probes'] = []
-    dct['models'] = []
-    dct['objects'] = []
-    dct['connections'] = []
+    for group in _model_groups:
+        dct[group] = []
 
 
 def _model_lookup(dct, key):
     try:
         return dct[key]
     except KeyError:
-        for group in 'objects', 'probes', 'connections', 'models':
-            for obj in dct[group]:
-                if obj.name == key:
-                    return obj
+        if 'model_type' in dct:
+            for group in _model_groups:
+                for obj in dct[group]:
+                    if obj.name == key:
+                        return obj
         raise
 
 
 def _rec_model_lookup(dct, key):
     for term in key.split('.'):
+        print '_rec_model_lookup', term, dct.keys()
         dct = _model_lookup(dct, term)
     return dct
 
 
 def model(name='root', descr=None):
-    new_model = DotDict({'name': name, 'descr':descr})
+    new_model = DotDict({'name': name,
+                         'descr':descr,
+                         'model_type': 'root'})
     _init_model(new_model)
     with defining(new_model):
         # -- leading underscores indicate "internal" objects
@@ -81,27 +85,32 @@ def model(name='root', descr=None):
         probe('_t')
     return defining(new_model)
 
-def submodel(name):
-    new_model = DotDict({'name': name})
+def submodel(name, descr=None):
+    new_model = DotDict({'name': name,
+                         'descr': descr,
+                         'model_type': 'sub'})
     _init_model(new_model)
     _active_model()['models'].append(new_model)
     return defining(new_model)
 
 
-def integrator(name, recurrent_tau, **ens_args):
+def integrator(name, recurrent_tau, dimensions=1, **ens_args):
     with submodel(name):
-        passthrough('in')
-        ensemble('integrator', **ens_args)
+        passthrough('in', dimensions=dimensions)
+        ensemble('integrator', dimensions=dimensions, **ens_args)
         connect('integrator', 'integrator', filter=recurrent_tau)
         connect('in', 'integrator', filter=recurrent_tau)
+        #TODO:  alias('integrator', 'out')
 
 
-def connect(src, dst, transform=None, filter=None, name=None):
+def connect(pre, post, transform=None, filter=None, name=None):
     _active_model()['connections'].append(DotDict({
         'name': name,
-        'src': src,
-        'dst': dst,
+        'connection_type': 'connection',
+        'pre': pre,
+        'post': post,
         'transform': transform,
+        'modulatory': False,
         'filter': filter}))
 
 def LIF(n_neurons, tau_rc=0.02, tau_ref=.002):
@@ -180,9 +189,13 @@ def node(name, output):
         }))
 
 
-def passthrough(name):
+def passthrough(name, dimensions):
     """Create a Passthrough Node"""
-    return node(name, output=None)
+    _active_model()['objects'].append(DotDict({
+        'object_type': 'passthrough',
+        'name': name,
+        'dimensions': dimensions,
+        }))
 
 
 def dimensions(signame, model=None):

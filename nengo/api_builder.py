@@ -74,9 +74,10 @@ class Builder(object):
         self.operators = []
 
         logger.info("Building objects")
-        model_objects = chain(*[m['objects'] for m in midx.values()])
-        for obj in model_objects:
-            getattr(self, 'build_%s' % obj['object_type'])(obj)
+        model_objects = chain(*[[(m, o) for o in m['objects']]
+                         for m in midx.values()])
+        for m, obj in model_objects:
+            getattr(self, 'build_%s' % obj['object_type'])(obj, m)
 
         print map(id, model_objects)
 
@@ -90,24 +91,24 @@ class Builder(object):
         model_conns = chain(*[[(m, c) for c in m['connections']]
                          for m in midx.values()])
         for m, c in model_conns:
-            getattr(self, 'build_%s' % obj['connection_type'])(c, m)
+            getattr(self, 'build_%s' % c['connection_type'])(c, m)
 
         # Set up t and timesteps
         self.operators.append(
             ProdUpdate(Signal(1),
-                       Signal(self.model.dt),
+                       Signal(self.dt),
                        Signal(1),
-                       self.model.t.output_signal))
+                       self.lookup(self.model,'_t').output_signal))
         self.operators.append(
             ProdUpdate(Signal(1),
                        Signal(1),
                        Signal(1),
-                       self.model.steps.output_signal))
+                       self.lookup(self.model, '_steps').output_signal))
 
     def _get_new_seed(self):
         return self.rng.randint(np.iinfo(np.int32).max)
 
-    def build_ensemble(self, ens, signal=None):
+    def build_ensemble(self, ens, submodel, signal=None):
         if ens.dimensions <= 0:
             raise ValueError(
                 'Number of dimensions (%d) must be positive' % ens.dimensions)
@@ -183,7 +184,7 @@ class Builder(object):
         # for probe in ens.probes['voltages']:
         #     probe.dimensions = ens.n_neurons
 
-    def build_passthrough(self, ptn):
+    def build_passthrough(self, ptn, submodel):
         ptn.input_signal = Signal(np.zeros(ptn.dimensions),
                                   name=ptn.name + ".signal")
         ptn.output_signal = ptn.input_signal
@@ -191,12 +192,7 @@ class Builder(object):
         #reset input signal to 0 each timestep
         self.operators.append(Reset(ptn.input_signal))
 
-        # Set up probes
-        for probe in ptn.probes['output']:
-            probe.dimensions = ptn.dimensions
-            self.model.add(probe)
-
-    def build_node(self, node):
+    def build_node(self, node, submodel):
         if not callable(node.output):
             if isinstance(node.output, (int, float, long, complex)):
                 node.output_signal = Signal([node.output], name=node.name)
@@ -215,12 +211,18 @@ class Builder(object):
             self.operators.append(DotInc(
                 node.input_signal, Signal([[1.0]]), node.pyfn.input_signal))
             node.output_signal = node.pyfn.output_signal
+        print 'build_node: %s.%s' % (submodel.name, node.name)
 
     def lookup(self, submodel, key):
         try:
             return api._rec_model_lookup(submodel, key)
         except KeyError:
-            return api._rec_model_lookup(self.model, key)
+            try:
+                print 'HERE', key
+                print [m['name'] for m in self.model['models']]
+                return api._rec_model_lookup(self.model, key)
+            except KeyError:
+                raise KeyError(key)
 
     def build_probe(self, pdict, submodel):
         obj = self.lookup(submodel, pdict.signame)
@@ -244,9 +246,9 @@ class Builder(object):
             Signal(n_coef), signal, Signal(o_coef), filtered))
         return filtered
 
-    def build_connection(self, conn):
-        conn.input_signal = conn.pre.output_signal
-        conn.output_signal = conn.post.input_signal
+    def build_connection(self, conn, submodel):
+        conn.input_signal = self.lookup(submodel, conn.pre + ".output_signal")
+        conn.output_signal = self.lookup(submodel, conn.post + ".input_signal")
         if conn.modulatory:
             # Make a new signal, effectively detaching from post
             conn.output_signal = Signal(np.zeros(conn.dimensions),
@@ -355,14 +357,14 @@ class Builder(object):
             connection.transform = trans
             self._builders[connection.__class__](connection)
 
-    def build_ensemblearray(self, ea):
+    def build_ensemblearray(self, ea, submodel):
         ea.input_signal = Signal(np.zeros(ea.dimensions),
                                  name=ea.name+".signal")
         self.operators.append(Reset(ea.input_signal))
         dims = ea.dimensions_per_ensemble
 
         for i, ens in enumerate(ea.ensembles):
-            self.build_ensemble(ens, signal=ea.input_signal[i*dims:(i+1)*dims])
+            self.build_ensemble(ens, submodel, signal=ea.input_signal[i*dims:(i+1)*dims])
 
         for probe in ea.probes['decoded_output']:
             probe.dimensions = ea.dimensions
