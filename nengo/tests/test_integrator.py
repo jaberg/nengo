@@ -25,21 +25,19 @@ class TestIntegrator(SimulatorTestCase):
             ng.probe('input')
             ng.probe('A', filter=0.01)
             ng.probe('T.integrator', filter=0.01)
-        print model
-        ng.simulator(model)
-        sim = model.simulator(dt=0.001, sim_class=self.Simulator)
+        sim = ng.simulator(model)
         sim.run(6.0)
 
         with Plotter(self.Simulator) as plt:
-            t = sim.data(model.t)
+            t = sim.data('_t')
             plt.plot(t, sim.data('A'), label='Manual')
-            plt.plot(t, sim.data('T.Integrator'), label='Template')
-            plt.plot(t, sim.data('Input'), 'k', label='Input')
+            plt.plot(t, sim.data('T.integrator'), label='Template')
+            plt.plot(t, sim.data('input'), 'k', label='Input')
             plt.legend(loc=0)
             plt.savefig('test_integrator.test_integrator.pdf')
             plt.close()
 
-        self.assertTrue(rmse(sim.data('A'), sim.data('T.Integrator')) < 0.2)
+        self.assertTrue(rmse(sim.data('A'), sim.data('T.integrator')) < 0.2)
 
 if __name__ == "__main__":
     nengo.log(debug=True, path='log.txt')

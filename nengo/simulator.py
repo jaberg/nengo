@@ -213,8 +213,8 @@ class Simulator(object):
             step_fn()
 
         # -- probes signals -> probe buffers
-        for probe in self.model.probes:
-            period = int(probe.dt / self.model.dt)
+        for probe in self.builder.probes:
+            period = int(probe.dt / self.builder.dt)
             if self.n_steps % period == 0:
                 tmp = self._sigdict[probe.sig].copy()
                 self.probe_outputs[probe].append(tmp)
@@ -257,9 +257,9 @@ class Simulator(object):
 
     def run(self, time_in_seconds):
         """Simulate for the given length of time."""
-        steps = int(np.round(float(time_in_seconds) / self.model.dt))
+        steps = int(np.round(float(time_in_seconds) / self.builder.dt))
         logger.debug("Running %s for %f seconds, or %d steps",
-                     self.model.name, time_in_seconds, steps)
+                     self.builder.model.name, time_in_seconds, steps)
         self.run_steps(steps)
 
     def run_steps(self, steps):
@@ -269,27 +269,21 @@ class Simulator(object):
                 logger.debug("Step %d", i)
             self.step()
 
-    def data(self, probe):
-        """Get data from signals that have been probed.
+    def data(self, name):
+        """Return data from probed signal.
 
         Parameters
         ----------
-        probe : Probe
-            TODO
+        probe : str
+
 
         Returns
         -------
-        data : ndarray
-            TODO: what are the dimensions?
+        data : ndarray shape (n_samples, signal_dimension)
         """
-        if not isinstance(probe, Probe):
-            if self.model.probed.has_key(probe):
-                probe = self.model.probed[probe]
-            else:
-                probe = self.model.probed[self.model.memo[id(probe)]]
-        return np.asarray(self.probe_outputs[probe])
+        for probe in self.builder.probes:
+            if probe.sig.name == name:
+                return np.asarray(self.probe_outputs[probe])
+        else:
+            raise KeyError(name)
 
-    def probe_data(self, probe):
-        """TODO
-        """
-        return np.asarray(self.probe_outputs[probe])

@@ -220,8 +220,6 @@ class Builder(object):
             return api._rec_model_lookup(submodel, key)
         except KeyError:
             try:
-                print 'HERE', key
-                print [m['name'] for m in self.model['models']]
                 return api._rec_model_lookup(self.model, key)
             except KeyError:
                 raise KeyError(key)
@@ -256,7 +254,7 @@ class Builder(object):
             conn.output_signal = Signal(np.zeros(conn.dimensions),
                                         name=conn.name + ".mod_output")
 
-        if self.lookup(conn.post, submodel).object_type == 'neurons':
+        if self.lookup(submodel, conn.post).object_type == 'neurons':
             conn.transform *= conn.post.gain[:, np.newaxis]
 
         # Set up filter
@@ -381,7 +379,8 @@ class Builder(object):
         dims = ea.dimensions_per_ensemble
 
         for i, ens in enumerate(ea.ensembles):
-            self.build_ensemble(ens, submodel, signal=ea.input_signal[i*dims:(i+1)*dims])
+            self.build_ensemble(ens, submodel,
+                                signal=ea.input_signal[i*dims:(i+1)*dims])
 
         for probe in ea.probes['decoded_output']:
             probe.dimensions = ea.dimensions
