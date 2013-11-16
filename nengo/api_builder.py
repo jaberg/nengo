@@ -1,4 +1,4 @@
-import copy
+from copy import deepcopy
 import logging
 import numpy as np
 import nonlinearities
@@ -46,22 +46,19 @@ class Builder(object):
 
     """
 
-    def __init__(self, copy=True):
+    def __init__(self, model, dt, copy=True):
         # Whether or not we make a deep-copy of the model we're building
         self.copy = copy
-
-    def _get_new_seed(self):
-        return self.rng.randint(np.iinfo(np.int32).max)
-
-    def __call__(self, model, dt):
+        model = model.model  #-- unpack it from the "defining" class
         if self.copy:
             # Make a copy of the model so that we can reuse the non-built model
             logger.info("Copying model")
             memo = {}
-            self.model = copy.deepcopy(model, memo)
+            self.model = deepcopy(model, memo)
             self.memo = memo
         else:
             self.model = model
+        del model
 
         self.dt = dt
         self.seed = self.model.get('seed',
@@ -69,63 +66,46 @@ class Builder(object):
         self.rng = np.random.RandomState(self.seed)
 
         midx = {}
-        model_index(midx, (), model)
+        model_index(midx, (), self.model)
+        self.midx = midx
 
         # The purpose of the build process is to fill up these lists
         self.probes = []
         self.operators = []
 
-        # 1. Build objects
         logger.info("Building objects")
-        objects = chain(*[m['objects'] for m in midx.values()])
-        for obj in self.model['objects']:
-            assert 'object_type' in obj, obj
+        model_objects = chain(*[m['objects'] for m in midx.values()])
+        for obj in model_objects:
             getattr(self, 'build_%s' % obj['object_type'])(obj)
 
-        # 2. Then probes
+        print map(id, model_objects)
+
         logger.info("Building probes")
         model_probes = chain(*[[(m, p) for p in m['probes']]
                          for m in midx.values()])
         for m, probe in model_probes:
             self.build_probe(probe, m)
 
-        # 3. Then connections
         logger.info("Building connections")
-        for o in self.model.objs.values():
-            for c in o.connections_out:
-                self._builders[c.__class__](c)
-        for c in self.model.connections:
-            self._builders[c.__class__](c)
+        model_conns = chain(*[[(m, c) for c in m['connections']]
+                         for m in midx.values()])
+        for m, c in model_conns:
+            getattr(self, 'build_%s' % obj['connection_type'])(c, m)
 
         # Set up t and timesteps
-        self.model.operators.append(
+        self.operators.append(
             ProdUpdate(Signal(1),
                        Signal(self.model.dt),
                        Signal(1),
                        self.model.t.output_signal))
-        self.model.operators.append(
+        self.operators.append(
             ProdUpdate(Signal(1),
                        Signal(1),
                        Signal(1),
                        self.model.steps.output_signal))
-        return self.model
 
-    @property
-    def signal(self):
-        class Lookup(object):
-            def __getitem__(_s, item):
-                name, submodel = item
-                for obj in submodel.get('objects', []):
-                    if obj.name == name:
-                        return obj
-                for obj in submodel.get('probes', []):
-                    if obj.name == name:
-                        return obj
-                for obj in submodel.get('connections', []):
-                    if obj.name == name:
-                        return obj
-                raise KeyError(name)
-        return Lookup()
+    def _get_new_seed(self):
+        return self.rng.randint(np.iinfo(np.int32).max)
 
     def build_ensemble(self, ens, signal=None):
         if ens.dimensions <= 0:
@@ -236,12 +216,15 @@ class Builder(object):
                 node.input_signal, Signal([[1.0]]), node.pyfn.input_signal))
             node.output_signal = node.pyfn.output_signal
 
-    def build_probe(self, pdict, submodel):
+    def lookup(self, submodel, key):
         try:
-            obj = self.signal[pdict.signame, submodel]
-            sig = obj.output_signal
+            return api._rec_model_lookup(submodel, key)
         except KeyError:
-            raise NotImplementedError(pdict)
+            return api._rec_model_lookup(self.model, key)
+
+    def build_probe(self, pdict, submodel):
+        obj = self.lookup(submodel, pdict.signame)
+        sig = obj.output_signal # -- installed by build_node
         pdict.input_signal = Signal(np.zeros(sig.shape),
                                     name=pdict.signame)
         self.operators.append(Reset(pdict.input_signal))

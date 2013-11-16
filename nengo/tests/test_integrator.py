@@ -12,19 +12,19 @@ logger = logging.getLogger(__name__)
 
 class TestIntegrator(SimulatorTestCase):
     def test_integrator(self):
-        model = {}
+        model = ng.model()
         inputs = {0:0, 0.2:1, 1:0, 2:-2, 3:0, 4:1, 5:0}
-        with ng.defining(model):
+        with model:
             ng.node('input', nengo.helpers.piecewise(inputs))
             tau = 0.1
             ng.integrator('T', tau,  neurons=ng.LIF(100), dimensions=1)
-            ng.connect('Input', 'T.in', filter=tau)
+            ng.connect('input', 'T.in', filter=tau)
             ng.ensemble('A', ng.LIF(100), dimensions=1)
             ng.connect('A', 'A', transform=[[1]], filter=tau)
-            ng.connect('Input', 'A', transform=[[tau]], filter=tau)
-            ng.probe('Input')
+            ng.connect('input', 'A', transform=[[tau]], filter=tau)
+            ng.probe('input')
             ng.probe('A', filter=0.01)
-            ng.probe('T.Integrator', filter=0.01)
+            ng.probe('T.integrator', filter=0.01)
         print model
         ng.simulator(model)
         sim = model.simulator(dt=0.001, sim_class=self.Simulator)

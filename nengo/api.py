@@ -21,8 +21,11 @@ class DotDict(dict):
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
     def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
         dc = copy.deepcopy
         rval = DotDict(map(partial(copy.deepcopy, memo=memo), self.items()))
+        assert id(self) not in rval
         memo[id(self)] = rval
         return rval
 
@@ -44,21 +47,41 @@ class defining(object):
 def _active_model():
     return model_stack[-1]
 
-
 def _init_model(dct):
-    with defining(dct):
-        node('t', output=0)
-        node('steps', output=0)
-        probe('t')
+    dct['probes'] = []
+    dct['models'] = []
+    dct['objects'] = []
+    dct['connections'] = []
 
 
-def model(name):
-    new_model = DotDict({'name': name})
+def _model_lookup(dct, key):
+    try:
+        return dct[key]
+    except KeyError:
+        for group in 'objects', 'probes', 'connections', 'models':
+            for obj in dct[group]:
+                if obj.name == key:
+                    return obj
+        raise
+
+
+def _rec_model_lookup(dct, key):
+    for term in key.split('.'):
+        dct = _model_lookup(dct, term)
+    return dct
+
+
+def model(name='root', descr=None):
+    new_model = DotDict({'name': name, 'descr':descr})
     _init_model(new_model)
+    with defining(new_model):
+        # -- leading underscores indicate "internal" objects
+        node('_t', output=0)
+        node('_steps', output=0)
+        probe('_t')
     return defining(new_model)
 
 def submodel(name):
-    _active_model().setdefault('models', [])
     new_model = DotDict({'name': name})
     _init_model(new_model)
     _active_model()['models'].append(new_model)
@@ -73,9 +96,9 @@ def integrator(name, recurrent_tau, **ens_args):
         connect('in', 'integrator', filter=recurrent_tau)
 
 
-def connect(src, dst, transform=None, filter=None):
-    _active_model().setdefault('connections', [])
+def connect(src, dst, transform=None, filter=None, name=None):
     _active_model()['connections'].append(DotDict({
+        'name': name,
         'src': src,
         'dst': dst,
         'transform': transform,
@@ -109,7 +132,6 @@ def _get_ens_by_name(name, model=None):
 
 def ensemble(name, neurons, dimensions, seed=None, radius=1.0):
     """Create an Ensemble"""
-    _active_model().setdefault('objects', [])
     _active_model()['objects'].append(DotDict({
         'object_type': 'ensemble',
         'name': name,
@@ -150,7 +172,6 @@ def n_neurons(name):
 
 def node(name, output):
     """Create a Node"""
-    _active_model().setdefault('objects', [])
     _active_model()['objects'].append(DotDict({
         'object_type': 'node',
         'name': name,
@@ -168,9 +189,9 @@ def dimensions(signame, model=None):
     return _get_ens_by_name(signame, model).dimensions
 
 
-def probe(signame, sample_every=0.001, filter=0.01):
-    _active_model().setdefault('probes', [])
+def probe(signame, sample_every=0.001, filter=0.01, name=None):
     _active_model()['probes'].append(DotDict({
+        'name': name,
         'signame': signame,
         'filter': filter,
         'sample_every': sample_every,
@@ -201,8 +222,7 @@ def simulator(model, dt=0.001, sim_class=Simulator):
         current state.
     """
     from api_builder import Builder
-    builder = Builder(copy=True)
-    builder(model, dt)
+    builder = Builder(model, dt, copy=True)
 
     raise NotImplementedError()
 
