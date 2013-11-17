@@ -1,28 +1,27 @@
+import logging
 import time
 import numpy as np
 
 import nengo
-from nengo.tests.helpers import SimulatorTestCase, unittest, assert_allclose
+from nengo.tests.helpers import SimulatorTestCase, unittest
+from nengo.api import model, LIF, ensemble, probe, simulator
 
-import logging
-logger = logging.getLogger(__name__)
+runtime_logger = logging.getLogger('nengo.tests.runtime')
 
 class TestProbe(SimulatorTestCase):
 
     def test_long_name(self):
-        m = nengo.Model('test_long_name', seed=123)
-        m.make_ensemble(("This is an extremely long name that will test "
-                         "if we can access sim data with long names"),
-                        nengo.LIF(10), 1)
-        m.probe("This is an extremely long name that will test "
-                "if we can access sim data with long names")
+        m = model(descr='test_long_name')
+        with m:
+            name = ("This is an extremely long name that will test "
+                    "if we can access sim data with long names")
+            ensemble(name, LIF(10), 1)
+            probe(name)
 
-        sim = m.simulator(sim_class=self.Simulator)
+        sim = simulator(m)
         sim.run(0.01)
 
-        self.assertIsNotNone(sim.data(
-            "This is an extremely long name that will test "
-            "if we can access sim data with long names"))
+        self.assertIsNotNone(sim.data(name))
 
     def test_multirun(self):
         """Test probing the time on multiple runs"""
@@ -31,9 +30,9 @@ class TestProbe(SimulatorTestCase):
         # set rtol a bit higher, since OCL model.t accumulates error over time
         rtol = 1e-4
 
-        model = nengo.Model("Multi-run")
-        sim = model.simulator(sim_class=self.Simulator)
-        dt = sim.model.dt
+        m = model("Multi-run")
+        sim = simulator(m)
+        dt = sim.builder.dt
 
         # t_stops = [0.123, 0.283, 0.821, 0.921]
         t_stops = dt * rng.randint(low=100, high=2000, size=10)
@@ -41,13 +40,12 @@ class TestProbe(SimulatorTestCase):
         t_sum = 0
         for ti in t_stops:
             sim.run(ti)
-            sim_t = sim.data(model.t).flatten()
-            t = dt * np.arange(len(sim_t))
+            sim_t = sim.data('_t').flatten()
+            t = dt * np.arange(len(sim_t)) + dt
             self.assertTrue(np.allclose(sim_t, t, rtol=rtol))
-            # assert_allclose(self, logger, sim_t, t, rtol=rtol)
 
             t_sum += ti
-            self.assertTrue(np.allclose(sim_t[-1], t_sum - dt, rtol=rtol))
+            self.assertTrue(np.allclose(sim_t[-1], t_sum, rtol=rtol))
 
     def test_dts(self):
         """Test probes with different sampling times."""
@@ -76,7 +74,7 @@ class TestProbe(SimulatorTestCase):
         timer = time.time()
         sim.run(simtime)
         timer = time.time() - timer
-        logger.debug(
+        runtime_logger.debug(
             "Ran %(n)s probes for %(simtime)s sec simtime in %(timer)0.3f sec"
             % locals())
 
@@ -118,7 +116,7 @@ class TestProbe(SimulatorTestCase):
         timer = time.time()
         sim.run(simtime)
         timer = time.time() - timer
-        logger.debug(
+        runtime_logger.debug(
             "Ran %(n)s probes for %(simtime)s sec simtime in %(timer)0.3f sec"
             % locals())
 

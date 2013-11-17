@@ -1,12 +1,13 @@
 import numpy as np
 
 import nengo
-import nengo.simulator as simulator
-from nengo.nonlinearities import PythonFunction, LIF, LIFRate
 from nengo.builder import Builder
 from nengo.builder import Signal
 from nengo.builder import ProdUpdate, Reset, DotInc, Copy
 from nengo.tests.helpers import unittest, rms, assert_allclose
+
+from nengo.api import model
+from nengo.api_builder import Builder
 
 import logging
 logger = logging.getLogger(__name__)
@@ -21,20 +22,22 @@ def testbuilder(model, dt):
 
 
 class TestSimulator(unittest.TestCase):
-    Simulator = simulator.Simulator
+    Simulator = nengo.simulator.Simulator
 
     def test_signal_init_values(self):
         """Tests that initial values are not overwritten."""
-        m = nengo.Model("test_signal_init_values")
+        m = model("test_signal_init_values")
         zero = Signal([0])
         one = Signal([1])
         five = Signal([5.0])
         zeroarray = Signal([[0],[0],[0]])
         array = Signal([1,2,3])
-        m.operators = [ProdUpdate(zero, zero, one, five),
-                       ProdUpdate(zeroarray, one, one, array)]
+        builder = Builder(m, dt=0.001)
+        builder.operators = [
+            ProdUpdate(zero, zero, one, five),
+            ProdUpdate(zeroarray, one, one, array)]
 
-        sim = m.simulator(sim_class=self.Simulator, builder=testbuilder)
+        sim = self.Simulator(builder)
         self.assertEqual(0, sim.signals[sim.get(zero)][0])
         self.assertEqual(1, sim.signals[sim.get(one)][0])
         self.assertEqual(5.0, sim.signals[sim.get(five)][0])
@@ -48,40 +51,45 @@ class TestSimulator(unittest.TestCase):
             np.array([1,2,3]) == sim.signals[sim.get(array)]))
 
     def test_steps(self):
-        m = nengo.Model("test_signal_indexing_1")
-        sim = m.simulator(sim_class=self.Simulator)
-        self.assertEqual(0, sim.signals[sim.model.steps.output_signal])
+        m = model()
+        builder = Builder(m, dt=0.001)
+        sim = self.Simulator(builder)
+        steps_signal = sim.builder.lookup({}, '_steps').output_signal
+        self.assertEqual(0, sim.signals[steps_signal])
         sim.step()
-        self.assertEqual(1, sim.signals[sim.model.steps.output_signal])
+        self.assertEqual(1, sim.signals[steps_signal])
         sim.step()
-        self.assertEqual(2, sim.signals[sim.model.steps.output_signal])
+        self.assertEqual(2, sim.signals[steps_signal])
 
     def test_time(self):
-        m = nengo.Model("test_signal_indexing_1")
-        sim = m.simulator(sim_class=self.Simulator)
-        self.assertEqual(0.00, sim.signals[sim.model.t.output_signal])
+        dt = .125
+        m = model()
+        builder = Builder(m, dt=dt)
+        sim = self.Simulator(builder)
+        signal = sim.builder.lookup({}, '_t').output_signal
+        self.assertEqual(0 * dt, sim.signals[signal])
         sim.step()
-        self.assertEqual(0.001, sim.signals[sim.model.t.output_signal])
+        self.assertEqual(1 * dt, sim.signals[signal])
         sim.step()
-        self.assertEqual(0.002, sim.signals[sim.model.t.output_signal])
+        self.assertEqual(2 * dt, sim.signals[signal])
 
     def test_signal_indexing_1(self):
-        m = nengo.Model("test_signal_indexing_1")
-
         one = Signal(np.zeros(1), name='a')
         two = Signal(np.zeros(2), name='b')
         three = Signal(np.zeros(3), name='c')
         tmp = Signal(np.zeros(3), name='tmp')
+        m = model()
+        builder = Builder(m, dt=0.001)
 
-        m.operators = [
+        builder.operators += [
             ProdUpdate(Signal(1), three[:1], Signal(0), one),
             ProdUpdate(Signal(2.0), three[1:], Signal(0), two),
             Reset(tmp),
             DotInc(Signal([[0,0,1],[0,1,0],[1,0,0]]), three, tmp),
             Copy(src=tmp, dst=three, as_update=True),
         ]
+        sim = self.Simulator(builder)
 
-        sim = m.simulator(sim_class=self.Simulator, builder=testbuilder)
         sim.signals[three] = np.asarray([1, 2, 3])
         sim.step()
         self.assertTrue(np.all(sim.signals[one] == 1))
@@ -235,7 +243,7 @@ class TestSimulator(unittest.TestCase):
 
 
 class TestNonlinear(unittest.TestCase):
-    Simulator = simulator.Simulator
+    Simulator = nengo.simulator.Simulator
 
     def test_pyfunc(self):
         """Test Python Function nonlinearity"""
@@ -252,6 +260,7 @@ class TestNonlinear(unittest.TestCase):
             fn = lambda x: np.cos(np.dot(A, x))
 
             x = np.random.normal(size=d)
+            PythonFunction=None
 
             m = nengo.Model("")
             ins = Signal(x, name='ins')
@@ -279,7 +288,7 @@ class TestNonlinear(unittest.TestCase):
                 assert_allclose(self, logger, s0, sim.signals[ins])
                 assert_allclose(self, logger, p0, sim.signals[pop.output_signal])
 
-    def _test_lif_base(self, cls=LIF):
+    def _test_lif_base(self, cls=None):
         """Test that the dynamic model approximately matches the rates"""
         rng = np.random.RandomState(85243)
 
