@@ -75,7 +75,7 @@ def model(name='root', descr=None):
         # -- leading underscores indicate "internal" objects
         node('_t', output=0)
         node('_steps', output=0)
-        probe('_t')
+        probe('_t', filter=0)
     return defining(new_model)
 
 

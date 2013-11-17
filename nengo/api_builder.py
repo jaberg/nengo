@@ -227,14 +227,25 @@ class Builder(object):
     def build_probe(self, pdict, submodel):
         obj = self.lookup(submodel, pdict.signame)
         sig = obj.output_signal # -- installed by build_node
-        pdict.input_signal = Signal(np.zeros(sig.shape),
-                                    name=pdict.signame)
-        self.operators.append(Reset(pdict.input_signal))
+        if pdict.filter > 0:
+            decay, inc = self.filter_coefs(pdict.filter, self.dt)
+            # -- need a filtered signal to record
+            pdict.input_signal = Signal(
+                np.zeros(sig.shape),
+                name=pdict.signame)
+            self.operators.append(ProdUpdate(
+                Signal(inc), sig, Signal(decay), pdict.input_signal))
+        else:
+            # -- just record straight from the original
+            pdict.input_signal = sig
+
         self.probes.append(Probe(pdict.input_signal, pdict.sample_every))
 
     @staticmethod
     def filter_coefs(pstc, dt):
-        pstc = max(pstc, dt)
+        assert dt > 0
+        if pstc <= 0:
+            raise ValueError('Invalid filter pstc', pstc)
         decay = np.exp(-dt / pstc)
         return decay, (1.0 - decay)
 

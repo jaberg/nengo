@@ -10,8 +10,6 @@ from collections import defaultdict
 import networkx as nx
 import numpy as np
 
-from .builder import Builder, Probe
-
 logger = logging.getLogger(__name__)
 
 
@@ -214,7 +212,7 @@ class Simulator(object):
 
         # -- probes signals -> probe buffers
         for probe in self.builder.probes:
-            period = int(probe.dt / self.builder.dt)
+            period = max(int(probe.dt / self.builder.dt), 1)
             if self.n_steps % period == 0:
                 tmp = self._sigdict[probe.sig].copy()
                 self.probe_outputs[probe].append(tmp)
