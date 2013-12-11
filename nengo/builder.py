@@ -945,7 +945,6 @@ class Builder(object):
 
         conn.input_signal = conn.pre.output_signal
         conn.output_signal = conn.post.input_signal
-        conn.transform_signal = Signal(conn.transform)
         dt = self.model.dt
 
         # Figure out the signal going across this connection
@@ -995,16 +994,19 @@ class Builder(object):
             conn.signal = conn.input_signal
 
         # Set up transform
-        conn.transform = np.asarray(conn.transform, dtype=np.float64)
+        transform = np.asarray(conn.transform, dtype=np.float64)
         if isinstance(conn.post, nengo.nonlinearities.Neurons):
-            conn.transform *= conn.post.gain[:, np.newaxis]
+            transform *= conn.post.gain[:, np.newaxis]
         if conn.modulatory:
             # Make a new signal, effectively detaching from post
             conn.output_signal = Signal(np.zeros(conn.output_signal.size),
                                         name=conn.label + ".mod_output")
+        conn.transform_signal = Signal(transform)
         self.model.operators.append(
             DotInc(
-                Signal(conn.transform), conn.signal, conn.output_signal,
+                conn.transform_signal,
+                conn.signal,
+                conn.output_signal,
                 tag=str(conn)))
 
         # Set up probes
