@@ -771,6 +771,11 @@ class Builder(object):
         for c in self.model.connections:
             self._builders[c.__class__](c)
 
+        # 4. Then learning rules
+        logger.info("Building connections")
+        for c in self.model.learning_rules:
+            self._builders[c.__class__](c, lrpass=True)
+
         return self.model
 
     @builds(nengo.Ensemble)
@@ -917,9 +922,10 @@ class Builder(object):
         decay = np.exp(-dt / pstc)
         return decay, (1.0 - decay)
 
-    def _filtered_signal(self, signal, filter):
-        name = signal.name + ".filtered(%f)" % filter
-        filtered = Signal(np.zeros(signal.size), name=name)
+    def _filtered_signal(self, signal, filter, name=None, ival=0):
+        if name is None:
+            name = signal.name + ".filtered(%f)" % filter
+        filtered = Signal(np.asarray(np.zeros(signal.size) + ival), name=name)
         o_coef, n_coef = self.filter_coefs(pstc=filter, dt=self.model.dt)
         self.model.operators.append(ProdUpdate(
             Signal(n_coef), signal, Signal(o_coef), filtered))
@@ -939,6 +945,7 @@ class Builder(object):
 
         conn.input_signal = conn.pre.output_signal
         conn.output_signal = conn.post.input_signal
+        conn.transform_signal = Signal(conn.transform)
         dt = self.model.dt
 
         # Figure out the signal going across this connection

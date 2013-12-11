@@ -396,9 +396,9 @@ class Probe(object):
     ----------
     sample_rate
     """
-
     def __init__(self, target, attr,
-                 sample_every=0.001, filter=None, dimensions=None):
+                 sample_every=0.001, filter=None, dimensions=None,
+                 key=None, ival=0):
         self.target = target
         self.attr = attr
         self.label = "Probe(" + target.label + "." + attr + ")"
@@ -410,6 +410,8 @@ class Probe(object):
 
         # add self to current context
         nengo.context.add_to_current(self)
+        self.key = key
+        self.ival = ival
 
     @property
     def sample_rate(self):
