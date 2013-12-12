@@ -473,7 +473,7 @@ class Copy(Operator):
         self.dst = dst
         self.src = src
         self.tag = tag
-        self.as_update = True
+        self.as_update = as_update
 
         self.reads = [src]
         self.sets = [] if as_update else [dst]
